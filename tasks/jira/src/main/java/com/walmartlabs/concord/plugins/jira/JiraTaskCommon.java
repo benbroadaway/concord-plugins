@@ -162,22 +162,14 @@ public class JiraTaskCommon {
                 objMain.put("assignee", assignee);
             }
 
-            if (customFieldsTypeKv != null && !customFieldsTypeKv.isEmpty()) {
-                for (Map.Entry<String, String> e : customFieldsTypeKv.entrySet()) {
-                    objMain.put(e.getKey(), String.valueOf(e.getValue()));
-                }
-            }
+            objMain.putAll(customFieldsTypeKv);
+            objMain.putAll(customFieldsTypeAtt);
 
-            if (customFieldsTypeAtt != null && !customFieldsTypeAtt.isEmpty()) {
-                for (Map.Entry<String, Object> e : customFieldsTypeAtt.entrySet()) {
-                    objMain.put(e.getKey(), e.getValue());
-                }
-            }
             Map<String, Object> objFields = Collections.singletonMap("fields", objMain);
 
             log.info("Creating new issue in '{}'...", projectKey);
 
-            Map<String, Object> results = new JiraClient(in)
+            Map<String, Object> results = getClient(in)
                     .url(in.jiraUrl() + "issue/")
                     .jiraAuth(buildAuth(in))
                     .successCode(201)
@@ -205,7 +197,7 @@ public class JiraTaskCommon {
             m.put("name", componentName);
             m.put("project", projectKey);
 
-            Map<String, Object> results = new JiraClient(in)
+            Map<String, Object> results = getClient(in)
                     .url(in.jiraUrl() + "component/")
                     .jiraAuth(buildAuth(in))
                     .successCode(201)
@@ -224,7 +216,7 @@ public class JiraTaskCommon {
         int componentId = in.componentId();
 
         try {
-            new JiraClient(in)
+            getClient(in)
                     .url(in.jiraUrl() + "component/" + componentId)
                     .jiraAuth(buildAuth(in))
                     .successCode(204)
@@ -246,7 +238,7 @@ public class JiraTaskCommon {
         }
 
         try {
-            new JiraClient(in)
+            getClient(in)
                     .url(in.jiraUrl() + "issue/" + issueKey + "/attachments")
                     .successCode(200)
                     .jiraAuth(buildAuth(in))
@@ -264,7 +256,7 @@ public class JiraTaskCommon {
         try {
             Map<String, Object> m = Collections.singletonMap("body", comment);
 
-            new JiraClient(in)
+            getClient(in)
                     .url(in.jiraUrl() + "issue/" + issueKey + "/comment")
                     .jiraAuth(buildAuth(in))
                     .successCode(201)
@@ -314,7 +306,7 @@ public class JiraTaskCommon {
             Map<String, Object> objFields = Collections.singletonMap("fields", objMain);
             objupdate = ConfigurationUtils.deepMerge(objFields, ConfigurationUtils.deepMerge(objTransition, objupdate));
 
-            new JiraClient(in)
+            getClient(in)
                     .url(in.jiraUrl() + "issue/" + issueKey + "/transitions")
                     .jiraAuth(buildAuth(in))
                     .successCode(204)
@@ -330,7 +322,7 @@ public class JiraTaskCommon {
         String issueKey = in.issueKey();
 
         try {
-            new JiraClient(in)
+            getClient(in)
                     .url(in.jiraUrl() + "issue/" + issueKey)
                     .jiraAuth(buildAuth(in))
                     .successCode(204)
@@ -349,11 +341,11 @@ public class JiraTaskCommon {
         log.info("Updating {} fields for issue #{}", fields, issueKey);
 
         try {
-            new JiraClient(in)
+            getClient(in)
                     .url(in.jiraUrl() + "issue/" + issueKey)
                     .jiraAuth(buildAuth(in))
                     .successCode(204)
-                    .put(Collections.singletonMap("fields", fields));
+                    .put(Map.of("fields", fields));
 
             log.info("Issue #{} updated successfully.", issueKey);
         } catch (Exception e) {
@@ -388,7 +380,7 @@ public class JiraTaskCommon {
                 List<String> fieldList = Collections.singletonList("key");
                 objMain.put("fields", fieldList);
 
-                Map<String, Object> results = new JiraClient(in)
+                Map<String, Object> results = getClient(in)
                         .url(in.jiraUrl() + "search")
                         .jiraAuth(buildAuth(in))
                         .successCode(200)
@@ -460,7 +452,7 @@ public class JiraTaskCommon {
 
     private Map<String, Object> currentStatus(CurrentStatusParams in) {
         try {
-            Map<String, Object> results = new JiraClient(in)
+            Map<String, Object> results = getClient(in)
                     .url(formatUrl(in.jiraUrl()) + "issue/" + in.issueKey() + "?fields=status")
                     .jiraAuth(buildAuth(in))
                     .successCode(200)
@@ -505,6 +497,10 @@ public class JiraTaskCommon {
             }
         }
         return jqlQuery;
+    }
+
+    JiraClient getClient(TaskParams in) {
+        return new JiraClient(in);
     }
 
 }

@@ -37,6 +37,7 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 public class JiraClient {
 
@@ -47,6 +48,7 @@ public class JiraClient {
     private static final JavaType LIST_OF_MAPS_TYPE = MAPPER.getTypeFactory()
             .constructCollectionType(List.class, MAP_TYPE);
     private static final String CONTENT_TYPE = "Content-Type";
+    static final String BOUNDARY = UUID.randomUUID().toString();
 
     private final HttpClient client;
     private final JiraClientCfg cfg;
@@ -99,12 +101,12 @@ public class JiraClient {
     }
 
     public void post(File file) throws IOException {
-        var requestBody = new MultipartBuilder()
+        var requestBody = new MultipartBuilder(BOUNDARY)
                 .addFormDataPart("file", file.getName(), new MultipartRequestBodyHandler.PathRequestBody(file.toPath()))
                 .build();
 
         try (InputStream body = requestBody.getContent()) {
-            var req = HttpRequest.newBuilder()
+            var req = requestBuilder(auth)
                     .uri(url)
                     .POST(HttpRequest.BodyPublishers.ofInputStream(() -> body))
                     .header(CONTENT_TYPE, requestBody.contentType().toString())
@@ -141,7 +143,7 @@ public class JiraClient {
                 .header("Accept", "application/json");
     }
 
-    private <T> T call(HttpRequest request, JavaType returnType) throws IOException {
+    <T> T call(HttpRequest request, JavaType returnType) throws IOException {
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -149,14 +151,18 @@ public class JiraClient {
             String results = response.body();
             assertResponseCode(statusCode, results, successCode);
 
-            return MAPPER.readValue(results, returnType);
+            if (results == null || statusCode == 204) {
+                return null;
+            } else {
+                return MAPPER.readValue(results, returnType);
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException(e);
         }
     }
 
-    private static void assertResponseCode(int code, String result, int successCode) {
+    static void assertResponseCode(int code, String result, int successCode) {
         if (code == successCode) {
             return;
         }

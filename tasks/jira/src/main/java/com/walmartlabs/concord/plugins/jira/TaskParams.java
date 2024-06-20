@@ -22,7 +22,9 @@ package com.walmartlabs.concord.plugins.jira;
 
 import com.walmartlabs.concord.runtime.v2.sdk.MapBackedVariables;
 import com.walmartlabs.concord.runtime.v2.sdk.Variables;
+import org.jetbrains.annotations.NotNull;
 
+import javax.annotation.Nonnull;
 import java.util.*;
 
 public class TaskParams implements JiraClientCfg {
@@ -178,12 +180,13 @@ public class TaskParams implements JiraClientCfg {
             return variables.getList(JIRA_ISSUE_COMPONENTS_KEY, null);
         }
 
+        @Nonnull
         public Map<String, String> customFieldsTypeKv() {
-            return variables.getMap(JIRA_CUSTOM_FIELDS_KV_KEY, null);
+            return variables.getMap(JIRA_CUSTOM_FIELDS_KV_KEY, Map.of());
         }
 
-        public Map<String, Object> customFieldsTypeAtt() {
-            return variables.getMap(JIRA_CUSTOM_FIELDS_ATTR_KEY, Collections.emptyMap());
+        public @Nonnull Map<String, Object> customFieldsTypeAtt() {
+            return variables.getMap(JIRA_CUSTOM_FIELDS_ATTR_KEY, Map.of());
         }
     }
 
@@ -341,7 +344,7 @@ public class TaskParams implements JiraClientCfg {
         }
 
         @Override
-        public Map<String, Object> customFieldsTypeAtt() {
+        public @NotNull Map<String, Object> customFieldsTypeAtt() {
             Map<String, Object> customFieldsTypeAtt = new HashMap<>(super.customFieldsTypeAtt());
             customFieldsTypeAtt.put("parent", Collections.singletonMap("key", parentKey()));
 
