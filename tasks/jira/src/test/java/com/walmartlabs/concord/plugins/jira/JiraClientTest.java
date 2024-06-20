@@ -64,7 +64,12 @@ class JiraClientTest {
 
     @BeforeEach
     void setUp() {
-        jiraClientCfg = new JiraClientCfg() {};
+        jiraClientCfg = new JiraClientCfg() {
+            @Override
+            public HttpVersion httpProtocolVersion() {
+                return HttpVersion.HTTP_1_1;
+            }
+        };
     }
 
     @Test

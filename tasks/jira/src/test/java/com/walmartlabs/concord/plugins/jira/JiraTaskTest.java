@@ -20,190 +20,94 @@ package com.walmartlabs.concord.plugins.jira;
  * =====
  */
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.github.tomakehurst.wiremock.common.ConsoleNotifier;
-import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
 import com.walmartlabs.concord.sdk.Context;
 import com.walmartlabs.concord.sdk.MockContext;
 import com.walmartlabs.concord.sdk.SecretService;
-import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.RegisterExtension;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.Mockito;
+import org.mockito.Mock;
+import org.mockito.Spy;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
 
-import static com.github.tomakehurst.wiremock.client.WireMock.*;
-import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.*;
+import static org.mockito.Mockito.nullable;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
+@ExtendWith(MockitoExtension.class)
 class JiraTaskTest {
-
-    @RegisterExtension
-    static WireMockExtension rule = WireMockExtension.newInstance()
-            .options(wireMockConfig()
-                    .dynamicPort()
-                    .notifier(new ConsoleNotifier(true)))
-            .build();
 
     @TempDir
     Path workDir;
 
-    private JiraTask task;
+    @Mock
+    private SecretService secretService;
+
+    @Mock
+    private JiraTaskCommon common;
+
+    @Spy
+    private JiraTask task = new JiraTask(secretService);
+
     private Context mockContext;
-    private final SecretService secretService = Mockito.mock(SecretService.class);
 
     @BeforeEach
     public void setup() {
         mockContext = new MockContext(new HashMap<>());
         mockContext.setVariable("txId", UUID.randomUUID());
         mockContext.setVariable("workDir", workDir.toString());
-        task = new JiraTask(secretService);
-        stubForBasicAuth();
-        stubForCurrentStatus();
-        stubForAddAttachment();
+
     }
 
     @Test
-    void testCreateIssueWithBasicAuth() throws Exception {
-        Map<String, Object> auth = new HashMap<>();
-        Map<String, Object> basic = new HashMap<>();
-        basic.put("username", "user");
-        basic.put("password", "pass");
+    void testExecute() {
+        mockContext.setVariable("action", "deleteIssue");
 
-        auth.put("basic", basic);
-        String url = rule.getRuntimeInfo().getHttpBaseUrl() + "/";
-        initCxtForRequest(mockContext, "CREATEISSUE", url, "projKey", "summary", "description",
-                "requestorUid", "bug", auth);
+        when(task.delegate(any())).thenReturn(common);
+        when(common.execute(any(TaskParams.DeleteIssueParams.class))).thenReturn(Map.of("ok", true));
 
-        task.execute(mockContext);
+        assertDoesNotThrow(() -> task.execute(mockContext));
+
+        var ok = assertInstanceOf(Boolean.class, mockContext.getVariable("ok"));
+        assertTrue(ok);
     }
 
     @Test
-    void testCreateIssueWithSecret() throws Exception {
-        Map<String, Object> auth = new HashMap<>();
-        Map<String, Object> secret = new HashMap<>();
-        secret.put("name", "secret");
-        secret.put("org", "organization");
+    void testGetStatus() {
+        when(task.delegate(any())).thenReturn(common);
+        when(common.execute(any(TaskParams.CurrentStatusParams.class))).thenReturn(Map.of("issueStatus", "Open"));
 
-        auth.put("secret", secret);
+        var status = assertDoesNotThrow(() -> task.getStatus(mockContext, "issue-123"));
 
-        String url = rule.getRuntimeInfo().getHttpBaseUrl() + "/";
-        initCxtForRequest(mockContext, "CREATEISSUE", url, "projKey", "summary", "description",
-                "requestorUid", "bug", auth);
-        task.execute(mockContext);
+        assertEquals("Open", status);
     }
 
     @Test
-    void testAddAttachment() {
-        mockContext.setVariable("apiUrl", rule.getRuntimeInfo().getHttpBaseUrl() + "/");
-        mockContext.setVariable("action", "addAttachment");
-        mockContext.setVariable("issueKey", "issueId");
-        mockContext.setVariable("userId", "userId");
-        mockContext.setVariable("password", "password");
-        mockContext.setVariable("filePath", "src/test/resources/sample.txt");
+    void testGetSecretService() throws Exception {
+        when(secretService.exportCredentials(any(Context.class), anyString(), anyString(), anyString(), anyString(), nullable(String.class)))
+                .thenReturn(Map.of("username", "foo", "password", "bar"));
 
-        task.execute(mockContext);
+        var v1SecretService = new JiraTask.V1SecretService(secretService, mockContext);
+
+        var creds = v1SecretService.exportCredentials("org", "name", null);
+
+        assertEquals("foo", creds.username());
+        assertEquals("bar", creds.password());
+
+        verify(secretService, times(1)).exportCredentials(any(Context.class), anyString(), anyString(), anyString(), anyString(), nullable(String.class));
     }
 
-    @Test
-    void testCurrentStatus() {
-        mockContext.setVariable("action", "currentStatus");
-        mockContext.setVariable("apiUrl", rule.getRuntimeInfo().getHttpBaseUrl() + "/");
-        mockContext.setVariable("issueKey", "issueId");
-        mockContext.setVariable("userId", "userId");
-        mockContext.setVariable("password", "password");
-
-        task.execute(mockContext);
-
-        var response = assertInstanceOf(String.class, mockContext.getVariable("issueStatus"));
-
-        assertNotNull(response);
-        assertEquals("Open", response);
-    }
-
-
-    private void initCxtForRequest(Context ctx, Object action, Object apiUrl, Object projectKey, Object summary, Object description,
-                                   Object requestorUid, Object issueType, Object auth) throws Exception {
-
-        ctx.setVariable("action", action);
-        ctx.setVariable("apiUrl", apiUrl);
-        ctx.setVariable("projectKey", projectKey);
-        ctx.setVariable("summary", summary);
-        ctx.setVariable("description", description);
-        ctx.setVariable("requestorUid", requestorUid);
-        ctx.setVariable("issueType", issueType);
-        ctx.setVariable("auth", auth);
-
-        doReturn(getCredentials()).when(secretService)
-                .exportCredentials(any(), anyString(), anyString(), anyString(), anyString(), anyString());
-
-    }
-
-    private Map<String, String> getCredentials() {
-        Map<String, String> credentials = new HashMap<>();
-        credentials.put("username", "user");
-        credentials.put("password", "pwd");
-        return credentials;
-    }
-
-    private void stubForBasicAuth() {
-        rule.stubFor(post(urlEqualTo("/issue/"))
-                .willReturn(aResponse()
-                        .withStatus(201)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("{\n" +
-                                  "  \"id\": \"123\",\n" +
-                                  "  \"key\": \"key1\",\n" +
-                                  "  \"self\": \"2\"\n" +
-                                  "}\n"))
-        );
-    }
-
-    private void stubForAddAttachment() {
-        rule.stubFor(post(urlEqualTo("/issue/issueId/attachments"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody("[{\n" +
-                                  "  \"id\": \"123\",\n" +
-                                  "  \"key\": \"key1\",\n" +
-                                  "  \"self\": \"2\"\n" +
-                                  "}]"))
-        );
-    }
-
-    private void stubForCurrentStatus() {
-        var body = Map.of(
-                "fields", Map.of(
-                        "status", Map.of(
-                                "name", "Open"
-                        )
-                )
-        );
-
-        var mapper = new ObjectMapper();
-
-        try {
-            rule.stubFor(get(urlEqualTo("/issue/issueId?fields=status"))
-                    .willReturn(aResponse()
-                            .withStatus(200)
-                            .withHeader("Content-Type", "application/json")
-                            .withBody(mapper.writeValueAsString(body)))
-            );
-        } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Invalid json: " + e.getMessage());
-        }
-    }
 }

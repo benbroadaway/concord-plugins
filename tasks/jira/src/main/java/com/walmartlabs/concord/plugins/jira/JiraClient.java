@@ -59,10 +59,18 @@ public class JiraClient {
     public JiraClient(JiraClientCfg cfg) {
         this.cfg = cfg;
 
-        client = HttpClient.newBuilder()
-                .connectTimeout(Duration.ofSeconds(cfg.connectTimeout()))
-                .version(HttpClient.Version.HTTP_1_1)
-                .build();
+        var builder = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(cfg.connectTimeout()));
+
+        if (cfg.httpProtocolVersion() != JiraClientCfg.HttpVersion.DEFAULT) {
+            if (cfg.httpProtocolVersion() == JiraClientCfg.HttpVersion.HTTP_2) {
+                builder.version(HttpClient.Version.HTTP_2);
+            } else if (cfg.httpProtocolVersion() == JiraClientCfg.HttpVersion.HTTP_1_1) {
+                builder.version(HttpClient.Version.HTTP_1_1);
+            }
+        }
+
+        client = builder.build();
     }
 
     public JiraClient url(String url) {

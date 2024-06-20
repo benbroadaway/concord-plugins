@@ -117,7 +117,7 @@ public class JiraTaskCommon {
     }
 
 
-    private Map<String, Object> createIssue(CreateIssueParams in) {
+    Map<String, Object> createIssue(CreateIssueParams in) {
         String projectKey = in.projectKey();
         String summary = in.summary();
         String description = in.description();
@@ -175,7 +175,7 @@ public class JiraTaskCommon {
                     .successCode(201)
                     .post(objFields);
 
-            issueId = results.get("key").toString().replaceAll("\"", "");
+            issueId = results.get("key").toString().replace("\"", "");
             log.info("Issue #{} created in Project# '{}'", issueId, projectKey);
         } catch (Exception e) {
             throw new RuntimeException("Error occurred while creating an issue: " + e.getMessage(), e);
@@ -184,11 +184,11 @@ public class JiraTaskCommon {
         return Collections.singletonMap(JIRA_ISSUE_ID_KEY, issueId);
     }
 
-    private Map<String, Object> createSubTask(CreateSubTaskParams in) {
+    Map<String, Object> createSubTask(CreateSubTaskParams in) {
         return createIssue(in);
     }
 
-    private Map<String, Object> createComponent(CreateComponentParams in) {
+    Map<String, Object> createComponent(CreateComponentParams in) {
         String projectKey = in.projectKey();
         String componentName = in.componentName();
 
@@ -204,7 +204,7 @@ public class JiraTaskCommon {
                     .post(m);
 
             String componentId = results.get("id").toString();
-            componentId = componentId.replaceAll("\"", "");
+            componentId = componentId.replace("\"", "");
             log.info("Component '{}' created successfully and its Id is '{}'", componentName, componentId);
             return Collections.singletonMap(JIRA_COMPONENT_ID_KEY, componentId);
         } catch (Exception e) {
@@ -212,7 +212,7 @@ public class JiraTaskCommon {
         }
     }
 
-    private void deleteComponent(DeleteComponentParams in) {
+    void deleteComponent(DeleteComponentParams in) {
         int componentId = in.componentId();
 
         try {
@@ -228,7 +228,7 @@ public class JiraTaskCommon {
         }
     }
 
-    private void addAttachment(AddAttachmentParams in) {
+    void addAttachment(AddAttachmentParams in) {
         String issueKey = in.issueKey();
         String filePath = in.filePath();
 
@@ -248,7 +248,7 @@ public class JiraTaskCommon {
         }
     }
 
-    private void addComment(AddCommentParams in) {
+    void addComment(AddCommentParams in) {
         String issueKey = in.issueKey();
         String comment = in.comment();
         boolean debug = in.debug();
@@ -272,7 +272,7 @@ public class JiraTaskCommon {
         }
     }
 
-    private void transition(TransitionParams in) {
+    void transition(TransitionParams in) {
         String issueKey = in.issueKey();
         String transitionId = Integer.toString(in.transitionId(-1));
         String transitionComment = in.transitionComment();
@@ -291,17 +291,8 @@ public class JiraTaskCommon {
             Map<String, Object> objupdate = Collections.singletonMap("update", objComment);
 
             Map<String, Object> objMain = new HashMap<>();
-            if (transitionFieldsTypeKv != null && !transitionFieldsTypeKv.isEmpty()) {
-                for (Map.Entry<String, String> e : transitionFieldsTypeKv.entrySet()) {
-                    objMain.put(e.getKey(), String.valueOf(e.getValue()));
-                }
-            }
-
-            if (transitionFieldsTypeAtt != null && !transitionFieldsTypeAtt.isEmpty()) {
-                for (Map.Entry<String, String> e : transitionFieldsTypeAtt.entrySet()) {
-                    objMain.put(e.getKey(), e.getValue());
-                }
-            }
+            transitionFieldsTypeKv.forEach((k, v) -> objMain.put(k, String.valueOf(v)));
+            objMain.putAll(transitionFieldsTypeAtt);
 
             Map<String, Object> objFields = Collections.singletonMap("fields", objMain);
             objupdate = ConfigurationUtils.deepMerge(objFields, ConfigurationUtils.deepMerge(objTransition, objupdate));
@@ -318,7 +309,7 @@ public class JiraTaskCommon {
         }
     }
 
-    private void deleteIssue(DeleteIssueParams in) {
+    void deleteIssue(DeleteIssueParams in) {
         String issueKey = in.issueKey();
 
         try {
@@ -334,7 +325,7 @@ public class JiraTaskCommon {
         }
     }
 
-    private void updateIssue(UpdateIssueParams in) {
+    void updateIssue(UpdateIssueParams in) {
         String issueKey = in.issueKey();
         Map<String, Object> fields = in.fields();
 
@@ -354,7 +345,7 @@ public class JiraTaskCommon {
     }
 
     @SuppressWarnings("unchecked")
-    private Map<String, Object> getIssues(GetIssuesParams in) {
+    Map<String, Object> getIssues(GetIssuesParams in) {
         String projectKey = in.projectKey();
         String issueType = in.issueType();
         String issueStatus = in.issueStatus();
@@ -444,7 +435,7 @@ public class JiraTaskCommon {
         String password = MapUtils.getString(input, JIRA_PASSWORD_KEY);
 
         try {
-            return secretService.exportCredentials(org, secretName, password);
+            return getSecretService().exportCredentials(org, secretName, password);
         } catch (Exception e) {
              throw new RuntimeException("Error export credentials: " + e.getMessage());
         }
@@ -501,6 +492,10 @@ public class JiraTaskCommon {
 
     JiraClient getClient(TaskParams in) {
         return new JiraClient(in);
+    }
+
+    JiraSecretService getSecretService() {
+        return secretService;
     }
 
 }
