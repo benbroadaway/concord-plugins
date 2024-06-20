@@ -20,40 +20,51 @@ package com.walmartlabs.concord.plugins.jira;
  * =====
  */
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.reflect.TypeToken;
-import com.squareup.okhttp.*;
+import com.fasterxml.jackson.databind.JavaType;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jdk8.Jdk8Module;
+import com.walmartlabs.concord.client2.impl.MultipartBuilder;
+import com.walmartlabs.concord.client2.impl.MultipartRequestBodyHandler;
 
 import java.io.File;
 import java.io.IOException;
-import java.lang.reflect.Type;
-import java.nio.file.Files;
+import java.io.InputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
+import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 public class JiraClient {
 
-    private static final OkHttpClient client = new OkHttpClient();
-    private static final Gson gson = new GsonBuilder().create();
+    private static final ObjectMapper MAPPER = new ObjectMapper()
+            .registerModule(new Jdk8Module());
+    static final JavaType MAP_TYPE = MAPPER.getTypeFactory()
+            .constructMapType(HashMap.class, String.class, Object.class);
+    private static final JavaType LIST_OF_MAPS_TYPE = MAPPER.getTypeFactory()
+            .constructCollectionType(List.class, MAP_TYPE);
+    private static final String CONTENT_TYPE = "Content-Type";
 
-    private static final TypeToken<Map<String, Object>> MAP_TYPE_TOKEN = new TypeToken<Map<String, Object>>() {
-    };
-    private static final TypeToken<List<Map<String, Object>>> LIST_OF_MAPS_TYPE_TOKEN = new TypeToken<List<Map<String, Object>>>() {
-    };
-
+    private final HttpClient client;
     private final JiraClientCfg cfg;
-    private String url;
+    private URI url;
     private int successCode;
     private String auth;
 
     public JiraClient(JiraClientCfg cfg) {
         this.cfg = cfg;
+
+        client = HttpClient.newBuilder()
+                .connectTimeout(Duration.ofSeconds(cfg.connectTimeout()))
+                .version(HttpClient.Version.HTTP_1_1)
+                .build();
     }
 
     public JiraClient url(String url) {
-        this.url = url;
+        this.url = URI.create(url);
         return this;
     }
 
@@ -68,82 +79,80 @@ public class JiraClient {
     }
 
     public Map<String, Object> get() throws IOException {
-        Request request = requestBuilder(auth)
-                .url(url)
-                .get()
+        HttpRequest request = requestBuilder(auth)
+                .uri(url)
+                .GET()
                 .build();
 
-        return call(request, MAP_TYPE_TOKEN.getType());
+        return call(request, MAP_TYPE);
     }
 
     public Map<String, Object> post(Map<String, Object> data) throws IOException {
-        RequestBody body = RequestBody.create(
-                MediaType.parse("application/json; charset=utf-8"), gson.toJson(data));
-        Request request = requestBuilder(auth)
-                .url(url)
-                .post(body)
+        HttpRequest.BodyPublisher body = HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(data));
+        HttpRequest request = requestBuilder(auth)
+                .uri(url)
+                .POST(body)
+                .header(CONTENT_TYPE, "application/json; charset=utf-8")
                 .build();
 
-        return call(request, MAP_TYPE_TOKEN.getType());
+        return call(request, MAP_TYPE);
     }
 
     public void post(File file) throws IOException {
-        MultipartBuilder b = new MultipartBuilder().type(MultipartBuilder.FORM);
-        b.addFormDataPart("file", file.getName(),
-                RequestBody.create(MediaType.parse("application/octet-stream"), Files.readAllBytes(file.toPath())));
-
-        RequestBody body = b.build();
-        Request request = requestBuilder(auth)
-                .header("X-Atlassian-Token", "nocheck")
-                .url(url)
-                .post(body)
+        var requestBody = new MultipartBuilder()
+                .addFormDataPart("file", file.getName(), new MultipartRequestBodyHandler.PathRequestBody(file.toPath()))
                 .build();
 
-        call(request, LIST_OF_MAPS_TYPE_TOKEN.getType());
+        try (InputStream body = requestBody.getContent()) {
+            var req = HttpRequest.newBuilder()
+                    .uri(url)
+                    .POST(HttpRequest.BodyPublishers.ofInputStream(() -> body))
+                    .header(CONTENT_TYPE, requestBody.contentType().toString())
+                    .header("X-Atlassian-Token", "nocheck")
+                    .build();
+
+            call(req, LIST_OF_MAPS_TYPE);
+        }
     }
 
     public void put(Map<String, Object> data) throws IOException {
-        RequestBody body = RequestBody.create(
-                MediaType.parse("application/json; charset=utf-8"), gson.toJson(data));
-        Request request = requestBuilder(auth)
-                .url(url)
-                .put(body)
+        HttpRequest request = requestBuilder(auth)
+                .uri(url)
+                .PUT(HttpRequest.BodyPublishers.ofString(MAPPER.writeValueAsString(data)))
+                .header(CONTENT_TYPE, "application/json; charset=utf-8")
                 .build();
 
-        call(request, MAP_TYPE_TOKEN.getType());
+        call(request, MAP_TYPE);
     }
 
     public void delete() throws IOException {
-        Request request = requestBuilder(auth)
-                .url(url)
-                .delete()
+        HttpRequest request = requestBuilder(auth)
+                .uri(url)
+                .DELETE()
                 .build();
 
-        call(request, MAP_TYPE_TOKEN.getType());
+        call(request, MAP_TYPE);
     }
 
-    private static Request.Builder requestBuilder(String auth) {
-        return new Request.Builder()
-                .addHeader("Authorization", auth)
-                .addHeader("Accept", "application/json");
+    private HttpRequest.Builder requestBuilder(String auth) {
+        return HttpRequest.newBuilder()
+                .timeout(Duration.ofSeconds(cfg.readTimeout()))
+                .header("Authorization", auth)
+                .header("Accept", "application/json");
     }
 
-    private <T> T call(Request request, Type returnType) throws IOException {
-        setClientTimeoutParams(cfg);
+    private <T> T call(HttpRequest request, JavaType returnType) throws IOException {
+        try {
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
 
-        Call call = client.newCall(request);
-        Response response = call.execute();
-
-        try (ResponseBody responseBody = response.body()) {
-            String results = null;
-            if (responseBody != null) {
-                results = responseBody.string();
-            }
-
-            int statusCode = response.code();
+            int statusCode = response.statusCode();
+            String results = response.body();
             assertResponseCode(statusCode, results, successCode);
 
-            return gson.fromJson(results, returnType);
+            return MAPPER.readValue(results, returnType);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(e);
         }
     }
 
@@ -153,23 +162,18 @@ public class JiraClient {
         }
 
         if (code == 400) {
-            throw new RuntimeException("input is invalid (e.g. missing required fields, invalid values). Here are the full error details: " + result);
+            throw new IllegalStateException("input is invalid (e.g. missing required fields, invalid values). Here are the full error details: " + result);
         } else if (code == 401) {
-            throw new RuntimeException("User is not authenticated. Here are the full error details: " + result);
+            throw new IllegalStateException("User is not authenticated. Here are the full error details: " + result);
         } else if (code == 403) {
-            throw new RuntimeException("User does not have permission to perform request. Here are the full error details: " + result);
+            throw new IllegalStateException("User does not have permission to perform request. Here are the full error details: " + result);
         } else if (code == 404) {
-            throw new RuntimeException("Issue does not exist. Here are the full error details: " + result);
+            throw new IllegalStateException("Issue does not exist. Here are the full error details: " + result);
         } else if (code == 500) {
-            throw new RuntimeException("Internal Server Error. Here are the full error details" + result);
+            throw new IllegalStateException("Internal Server Error. Here are the full error details" + result);
         } else {
-            throw new RuntimeException("Error: " + result);
+            throw new IllegalStateException("Error: " + result);
         }
     }
 
-    private static void setClientTimeoutParams(JiraClientCfg cfg) {
-        client.setConnectTimeout(cfg.connectTimeout(), TimeUnit.SECONDS);
-        client.setReadTimeout(cfg.readTimeout(), TimeUnit.SECONDS);
-        client.setWriteTimeout(cfg.writeTimeout(), TimeUnit.SECONDS);
-    }
 }

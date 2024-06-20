@@ -20,33 +20,35 @@ package com.walmartlabs.concord.plugins.jira;
  * =====
  */
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.tomakehurst.wiremock.common.ConsoleNotifier;
 import com.github.tomakehurst.wiremock.junit5.WireMockExtension;
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-import com.google.gson.JsonObject;
 import com.walmartlabs.concord.sdk.Context;
+import com.walmartlabs.concord.sdk.MockContext;
 import com.walmartlabs.concord.sdk.SecretService;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.RegisterExtension;
-import org.mockito.ArgumentMatchers;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mockito;
-import org.mockito.stubbing.Answer;
 
+import java.nio.file.Path;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.*;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.wireMockConfig;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 
-public class JiraTaskTest {
+class JiraTaskTest {
 
     @RegisterExtension
     static WireMockExtension rule = WireMockExtension.newInstance()
@@ -55,33 +57,33 @@ public class JiraTaskTest {
                     .notifier(new ConsoleNotifier(true)))
             .build();
 
+    @TempDir
+    Path workDir;
+
     private JiraTask task;
-    private final Context mockContext = mock(Context.class);
+    private Context mockContext;
     private final SecretService secretService = Mockito.mock(SecretService.class);
-    protected String response;
 
     @BeforeEach
     public void setup() {
+        mockContext = new MockContext(new HashMap<>());
+        mockContext.setVariable("txId", UUID.randomUUID());
+        mockContext.setVariable("workDir", workDir.toString());
         task = new JiraTask(secretService);
         stubForBasicAuth();
         stubForCurrentStatus();
         stubForAddAttachment();
     }
 
-    @AfterEach
-    public void tearDown() {
-        response = null;
-    }
-
     @Test
-    public void testCreateIssueWithBasicAuth() throws Exception {
+    void testCreateIssueWithBasicAuth() throws Exception {
         Map<String, Object> auth = new HashMap<>();
         Map<String, Object> basic = new HashMap<>();
         basic.put("username", "user");
         basic.put("password", "pass");
 
         auth.put("basic", basic);
-        String url = rule.baseUrl() + "/";
+        String url = rule.getRuntimeInfo().getHttpBaseUrl() + "/";
         initCxtForRequest(mockContext, "CREATEISSUE", url, "projKey", "summary", "description",
                 "requestorUid", "bug", auth);
 
@@ -89,7 +91,7 @@ public class JiraTaskTest {
     }
 
     @Test
-    public void testCreateIssueWithSecret() throws Exception {
+    void testCreateIssueWithSecret() throws Exception {
         Map<String, Object> auth = new HashMap<>();
         Map<String, Object> secret = new HashMap<>();
         secret.put("name", "secret");
@@ -97,60 +99,52 @@ public class JiraTaskTest {
 
         auth.put("secret", secret);
 
-        String url = rule.baseUrl() + "/";
+        String url = rule.getRuntimeInfo().getHttpBaseUrl() + "/";
         initCxtForRequest(mockContext, "CREATEISSUE", url, "projKey", "summary", "description",
                 "requestorUid", "bug", auth);
         task.execute(mockContext);
     }
 
     @Test
-    public void testAddAttachment() {
-        when(mockContext.getVariable("apiUrl")).thenReturn(rule.baseUrl() + "/");
-        when(mockContext.getVariable("action")).thenReturn("addAttachment");
-        when(mockContext.getVariable("issueKey")).thenReturn("issueId");
-        when(mockContext.getVariable("userId")).thenReturn("userId");
-        when(mockContext.getVariable("password")).thenReturn("password");
-        when(mockContext.getVariable("filePath")).thenReturn("src/test/resources/sample.txt");
+    void testAddAttachment() {
+        mockContext.setVariable("apiUrl", rule.getRuntimeInfo().getHttpBaseUrl() + "/");
+        mockContext.setVariable("action", "addAttachment");
+        mockContext.setVariable("issueKey", "issueId");
+        mockContext.setVariable("userId", "userId");
+        mockContext.setVariable("password", "password");
+        mockContext.setVariable("filePath", "src/test/resources/sample.txt");
 
         task.execute(mockContext);
     }
 
     @Test
-    public void testCurrentStatus() {
-        when(mockContext.getVariable("action")).thenReturn("currentStatus");
-        when(mockContext.getVariable("apiUrl")).thenReturn(rule.baseUrl() + "/");
-        when(mockContext.getVariable("issueKey")).thenReturn("issueId");
-        when(mockContext.getVariable("userId")).thenReturn("userId");
-        when(mockContext.getVariable("password")).thenReturn("password");
-
-        doAnswer((Answer<Void>) invocation -> {
-            response = (String) invocation.getArguments()[1];
-            return null;
-        }).when(mockContext).setVariable(ArgumentMatchers.anyString(), ArgumentMatchers.any());
+    void testCurrentStatus() {
+        mockContext.setVariable("action", "currentStatus");
+        mockContext.setVariable("apiUrl", rule.getRuntimeInfo().getHttpBaseUrl() + "/");
+        mockContext.setVariable("issueKey", "issueId");
+        mockContext.setVariable("userId", "userId");
+        mockContext.setVariable("password", "password");
 
         task.execute(mockContext);
 
+        var response = assertInstanceOf(String.class, mockContext.getVariable("issueStatus"));
+
         assertNotNull(response);
-        assertEquals("Open1", response);
+        assertEquals("Open", response);
     }
 
 
     private void initCxtForRequest(Context ctx, Object action, Object apiUrl, Object projectKey, Object summary, Object description,
                                    Object requestorUid, Object issueType, Object auth) throws Exception {
 
-        when(ctx.getVariable("action")).thenReturn(action);
-        when(ctx.getVariable("apiUrl")).thenReturn(apiUrl);
-        when(ctx.getVariable("projectKey")).thenReturn(projectKey);
-        when(ctx.getVariable("summary")).thenReturn(summary);
-        when(ctx.getVariable("description")).thenReturn(description);
-        when(ctx.getVariable("requestorUid")).thenReturn(requestorUid);
-        when(ctx.getVariable("issueType")).thenReturn(issueType);
-        when(ctx.getVariable("auth")).thenReturn(auth);
-
-        doAnswer((Answer<Void>) invocation -> {
-            response = (String) invocation.getArguments()[1];
-            return null;
-        }).when(ctx).setVariable(anyString(), any());
+        ctx.setVariable("action", action);
+        ctx.setVariable("apiUrl", apiUrl);
+        ctx.setVariable("projectKey", projectKey);
+        ctx.setVariable("summary", summary);
+        ctx.setVariable("description", description);
+        ctx.setVariable("requestorUid", requestorUid);
+        ctx.setVariable("issueType", issueType);
+        ctx.setVariable("auth", auth);
 
         doReturn(getCredentials()).when(secretService)
                 .exportCredentials(any(), anyString(), anyString(), anyString(), anyString(), anyString());
@@ -169,12 +163,11 @@ public class JiraTaskTest {
                 .willReturn(aResponse()
                         .withStatus(201)
                         .withHeader("Content-Type", "application/json")
-                        //.withHeader("Accept", "application/json")
                         .withBody("{\n" +
-                                "  \"id\": \"123\",\n" +
-                                "  \"key\": \"key1\",\n" +
-                                "  \"self\": \"2\"\n" +
-                                "}"))
+                                  "  \"id\": \"123\",\n" +
+                                  "  \"key\": \"key1\",\n" +
+                                  "  \"self\": \"2\"\n" +
+                                  "}\n"))
         );
     }
 
@@ -184,32 +177,33 @@ public class JiraTaskTest {
                         .withStatus(200)
                         .withHeader("Content-Type", "application/json")
                         .withBody("[{\n" +
-                                "  \"id\": \"123\",\n" +
-                                "  \"key\": \"key1\",\n" +
-                                "  \"self\": \"2\"\n" +
-                                "}]"))
+                                  "  \"id\": \"123\",\n" +
+                                  "  \"key\": \"key1\",\n" +
+                                  "  \"self\": \"2\"\n" +
+                                  "}]"))
         );
     }
 
     private void stubForCurrentStatus() {
-        JsonObject status = new JsonObject();
-        status.addProperty("name", "Open");
-
-        JsonObject fields = new JsonObject();
-        fields.add("status", status);
-
-        JsonObject response = new JsonObject();
-        response.add("fields", fields);
-
-        Gson gson = new GsonBuilder()
-                .setPrettyPrinting()
-                .create();
-
-        rule.stubFor(get(urlEqualTo("/issue/issueId?fields=status"))
-                .willReturn(aResponse()
-                        .withStatus(200)
-                        .withHeader("Content-Type", "application/json")
-                        .withBody(gson.toJson(response)))
+        var body = Map.of(
+                "fields", Map.of(
+                        "status", Map.of(
+                                "name", "Open"
+                        )
+                )
         );
+
+        var mapper = new ObjectMapper();
+
+        try {
+            rule.stubFor(get(urlEqualTo("/issue/issueId?fields=status"))
+                    .willReturn(aResponse()
+                            .withStatus(200)
+                            .withHeader("Content-Type", "application/json")
+                            .withBody(mapper.writeValueAsString(body)))
+            );
+        } catch (JsonProcessingException e) {
+            throw new IllegalArgumentException("Invalid json: " + e.getMessage());
+        }
     }
 }

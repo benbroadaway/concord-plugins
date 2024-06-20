@@ -20,6 +20,8 @@ package com.walmartlabs.concord.plugins.jira;
  * =====
  */
 
+import java.util.Base64;
+
 public class JiraCredentials {
 
     private final String username;
@@ -36,5 +38,9 @@ public class JiraCredentials {
 
     public String password() {
         return password;
+    }
+
+    public String authHeaderValue() {
+        return "Basic " + Base64.getEncoder().encodeToString((username + ":" + password).getBytes());
     }
 }

@@ -20,7 +20,6 @@ package com.walmartlabs.concord.plugins.jira;
  * =====
  */
 
-import com.squareup.okhttp.Credentials;
 import com.walmartlabs.concord.common.ConfigurationUtils;
 import com.walmartlabs.concord.sdk.MapUtils;
 import org.slf4j.Logger;
@@ -423,7 +422,7 @@ public class JiraTaskCommon {
 
     private String buildAuth(TaskParams in) {
         JiraCredentials c = credentials(in);
-        return Credentials.basic(c.username(), c.password());
+        return c.authHeaderValue();
     }
 
     private JiraCredentials credentials(TaskParams in) {
